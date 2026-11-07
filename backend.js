@@ -43,7 +43,7 @@ const application = {async fetch(req,env){
    const day=url.searchParams.get('date')||new Date(now+28800000).toISOString().slice(0,10);
    const t=Date.parse(day+'T00:00:00+08:00');
    if(!Number.isFinite(t))return fail('日期格式錯誤');
-   return reply(await list("SELECT * FROM loans WHERE status='已取件' OR (status='已預約' AND start>=? AND start<?) ORDER BY start LIMIT 100",t,t+86400000));
+   return reply(await list("SELECT * FROM loans WHERE status='已取件' OR (status='已預約' AND start>=? AND start<?) OR (status='已歸還' AND returned>=? AND returned<?) ORDER BY start LIMIT 100",t,t+86400000,t,t+86400000));
   }
   if(path==='/api/maintenance'&&role==='管理員')return reply(await list('SELECT * FROM repairs ORDER BY opened DESC LIMIT 100'));
   if(path==='/api/audit'&&role==='管理員')return reply(await list('SELECT * FROM audit WHERE tag=? ORDER BY id DESC LIMIT 100',url.searchParams.get('tag')??''));
