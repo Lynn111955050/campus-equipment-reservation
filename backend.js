@@ -1,3 +1,4 @@
+import {handleRooms} from './rooms.js';
 import {html} from './page.js';
 const demo={student:'學生',student2:'學生',desk:'櫃台',admin:'管理員'};
 const messages={ASSET_UNAVAILABLE:'器材目前維修中或不存在',SLOT_CONFLICT:'此時段已被預約'};
@@ -32,6 +33,8 @@ const application = {async fetch(req,env){
  const user=await one('SELECT actor,role FROM sessions WHERE token=? AND expires>?',token,now);
  if(!user)return fail('請先登入或重新登入',401);
  const {actor,role}=user;
+ const roomResponse=await handleRooms(req,env,user,body);
+ if(roomResponse)return roomResponse;
  const start=Date.parse(body.start??url.searchParams.get('start')),end=Date.parse(body.end??url.searchParams.get('end'));
  if(method==='GET'){
   if(path==='/api/assets'&&role==='學生'){
