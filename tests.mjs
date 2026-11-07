@@ -1,0 +1,31 @@
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import worker from './backend.js';
+const sqlite=new DatabaseSync(':memory:');
+sqlite.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8'));
+const DB={prepare(q){const s=sqlite.prepare(q);return {bind(...a){return {first:()=>s.get(...a),all:()=>({results:s.all(...a)}),run:()=>s.run(...a)}}}},batch(stmts){sqlite.exec('BEGIN');try{const r=stmts.map(s=>s.run());sqlite.exec('COMMIT');return r}catch(e){sqlite.exec('ROLLBACK');throw e}}};
+const api=async(path,body,user,key=crypto.randomUUID())=>{const res=await worker.fetch(new Request('https://demo.test/api/'+path,{method:body?'POST':'GET',headers:{...(user?{Authorization:'Bearer '+user.token}:{}),'Idempotency-Key':key},body:body?JSON.stringify(body):undefined}),{DB});return {status:res.status,...(await res.json())}};
+const sign=actor=>api('login',{actor,password:'DemoAV-2026'});
+const [a,b,desk,admin]=await Promise.all(['student','student2','desk','admin'].map(sign));
+assert.equal(a.status,200);
+const day=new Date(Date.now()+115200000).toISOString().slice(0,10);
+const payload={tag:'CAM-01',start:day+'T10:00:00+08:00',end:day+'T11:00:00+08:00'};
+const key=crypto.randomUUID(), book=await api('reservations',payload,a,key);
+assert.equal(book.status,201);
+assert.equal((await api('reservations',payload,a,key)).status,200);
+assert.equal((await api('reservations',payload,b)).status,409);
+assert.equal((await api('reservations/'+book.id+'/cancel',{},b)).status,404);
+const next=await api('reservations',{...payload,start:day+'T11:00:00+08:00',end:day+'T12:00:00+08:00'},b);
+assert.equal(next.status,201);
+sqlite.prepare('UPDATE loans SET start=?,end=? WHERE id=?').run(Date.now()-1000,Date.now()+1800000,book.id);
+assert.equal((await api('reservations/'+book.id+'/checkout',{tag:'CAM-01',student:'student'},desk)).status,200);
+assert.equal((await api('reservations/'+book.id+'/return',{tag:'CAM-01',condition:'故障',note:'鏡頭卡住'},desk)).status,200);
+assert.equal(sqlite.prepare('SELECT status FROM loans WHERE id=?').get(next.id).status,'已取消');
+const ticket=sqlite.prepare('SELECT id FROM repairs').get();
+assert.equal((await api('maintenance/'+ticket.id+'/close',{note:'已復測'},admin)).status,200);
+assert.equal(sqlite.prepare("SELECT status FROM assets WHERE tag='CAM-01'").get().status,'可借');
+assert.equal((await api('maintenance/'+ticket.id+'/close',{note:'重複'},admin)).status,409);
+console.log('Passed: login, shared booking, duplicate booking, retry, unauthorized cancel, checkout, defective return, automatic cancellation, repair closure');
+
+
