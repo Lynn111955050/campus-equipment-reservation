@@ -14,9 +14,9 @@ main{max-width:1200px;padding:0 24px;margin:auto}.breadcrumb{padding:20px 0;colo
  <div class="section-heading"><h2>借用流程</h2><span class="section-label">CAMPUS BORROWING GUIDE</span></div>
  <p class="hint guide-intro">器材與教室各有交接方式。預約前先確認時段，完成後可在個人紀錄查看目前狀態。</p>
  <div class="guide-grid">
-  <article class="guide-card"><span class="guide-number">01　查詢與預約</span><h3>只列出所選時段可借的資源</h3><p>有重疊預約的器材與教室不會出現在查詢結果。前一筆12:00結束，下一筆12:00開始可接續預約。更改時段後，請重新查詢。</p></article>
-  <article class="guide-card"><span class="guide-number">02　取件或簽到</span><h3>器材到櫃台領取　教室線上簽到</h3><p>器材由櫃台核對學生帳號與標籤，開始後15分鐘內領取。教室於開始前15分鐘至開始後15分鐘內簽到；前一組仍使用中時，須待其結束。</p></article>
-  <article class="guide-card"><span class="guide-number">03　歸還或結束</span><h3>完成交接後保留借用紀錄</h3><p>器材須由櫃台驗收歸還；教室使用完畢可自行按「結束使用」。已歸還、已結束的按鈕會停用，避免重複操作。提早完成仍保留原預約時段。</p></article>
+  <article class="guide-card"><span class="guide-number">01　查詢與預約</span><h3>列出所選時段可借的資源</h3><p>選擇時段並查詢，再預約可借的器材或教室。</p></article>
+  <article class="guide-card"><span class="guide-number">02　取件或簽到</span><h3>器材到櫃台領取　教室線上簽到</h3><p>器材請於開始後15分鐘內至櫃台領取；教室請於開始前後15分鐘內簽到。</p></article>
+  <article class="guide-card"><span class="guide-number">03　歸還或結束</span><h3>完成交接後保留借用紀錄</h3><p>器材由櫃台驗收歸還；教室請按「結束使用」。提早完成仍保留原時段。</p></article>
  </div>
 </div>
 <div id="app"></div><details class="rules compact-rules" id="rules"><summary><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h6a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H4zM13 6a3 3 0 0 1 3-3h5v15h-4a4 4 0 0 0-4 3"/></svg><h2>器材借用須知</h2><span class="section-label">BORROWING GUIDELINES</span><span class="rules-toggle">展開查看</span></summary><div class="rule-grid"><div class="rule"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18M7 14h3m4 0h3m-10 4h3"/></svg><h3>預約時段</h3><p>開放未來 14 天內時段。每日 09:00–17:00，以 30 分鐘為單位，單次借用 30 分鐘至 4 小時。</p></div><div class="rule"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><h3>取件與身分核對</h3><p>請於預約開始後 15 分鐘內至櫃台取件，出示學生證，由櫃台核對帳號與器材標籤。</p></div><div class="rule"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3a6 6 0 0 0-7 8L2 18a3 3 0 0 0 4 4l7-6a6 6 0 0 0 8-7l-5 4-4-4 4-5z"/></svg><h3>歸還與驗收</h3><p>請按預約時間歸還。歸還時由櫃台檢查器材；如有故障，系統將停止出借並建立維修單。</p></div></div></details>
@@ -188,10 +188,25 @@ function downloadRoomCalendar(row){
 }
 async function roomSubmit(op,id,data,formElement){
  if(op==='room-search'){
+  const issue=searchFormIssue(formElement);
+  if(issue)throw Error(issue);
+  const revision=++searchRevision;
+  const box=document.querySelector('#results');
+  if(box){box.hidden=false;box.innerHTML='<p role="status">正在查詢可借教室…</p>'}
   roomSelection={start:roomDateTime(data.room_start),end:roomDateTime(data.room_end),people:data.people};
   const query=new URLSearchParams({...roomSelection,projector:data.projector==='需要'?'1':'0',accessible:data.accessible==='需要'?'1':'0'});
-  const rooms=await api('rooms?'+query);
-  if(screen==='教室預約'&&revision===searchRevision)roomResults('可借教室',rooms.map(room=>roomCard(room)).join(''));
+  let rooms;
+  try{
+   rooms=await api('rooms?'+query);
+  }catch(error){
+   if(screen==='教室預約'&&revision===searchRevision){
+    roomResults('可借教室','<p class="empty" role="alert">教室查詢失敗，請稍後再試。</p>');
+   }
+   throw error;
+  }
+  if(screen!=='教室預約'||revision!==searchRevision)return;
+  roomResults('可借教室',rooms.length?rooms.map(room=>roomCard(room)).join(''):'<p class="empty" role="status">目前無空教室可借用</p>');
+  msg(rooms.length?'查詢完成，共 '+rooms.length+' 間教室可借用。':'目前無空教室可借用');
   return;
  }
  if(op==='room-refresh'){render();return}
