@@ -1,0 +1,72 @@
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync,writeFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import worker from '../dist/server/index.js';
+const realNow=Date.now;
+let time=Date.parse('2026-11-09T09:00:00+08:00');
+Date.now=()=>time;
+const results=[];
+function expect(label,actual,wanted){assert.deepEqual(actual,wanted,label);results.push(label)}
+function setup(){
+ const db=new DatabaseSync(':memory:');
+ for(const f of ['../migrations/0001_initial.sql','../drizzle/0002_rooms.sql','../drizzle/0003_room_event_integrity.sql','../drizzle/0004_integrity_constraints.sql'])db.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ const DB={prepare(q){const stmt=db.prepare(q);return {bind(...a){return {first:()=>stmt.get(...a),all:()=>({results:stmt.all(...a)}),run:()=>stmt.run(...a)}}}},batch(stmts){db.exec('BEGIN');try{const result=stmts.map(s=>s.run());db.exec('COMMIT');return result}catch(e){db.exec('ROLLBACK');throw e}}};
+ const api=async(path,body,user,key=crypto.randomUUID())=>{
+  const r=await worker.fetch(new Request('https://test.example/api/'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(user?{Authorization:'Bearer '+user.token}:{}),'Idempotency-Key':key},body:body?JSON.stringify(body):undefined}),{DB});
+  return {status:r.status,data:await r.json()};
+ };
+ return {db,api};
+}
+const {db,api}=setup();
+const login=async actor=>(await api('login',{actor,password:'DemoAV-2026'})).data;
+const [student,other,desk,admin]=await Promise.all(['student','student2','desk','admin'].map(login));
+for(const [id,capacity,projector,accessible] of [['R1',40,1,1],['R2',12,1,0],['R3',20,0,1],['R4',50,1,1],['R5',8,0,0]])await api('rooms',{id,name:id,location:'教學樓',capacity,projector,accessible},admin);
+const slot=(h,m=0)=>'2026-11-09T'+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':00+08:00';
+const payload={room_id:'R1',start:slot(11),end:slot(12),people:5,purpose:'課程小組討論'};
+const first=await api('room-reservations',payload,student);
+expect('建立教室預約',first.status,201);
+await api('room-reservations',{...payload,room_id:'R2',start:slot(12,30),end:slot(13)},student);
+await api('room-reservations',{...payload,room_id:'R3',start:slot(13),end:slot(14)},student);
+// The standalone room reference is checked even when the reservation is NULL.
+assert.throws(()=>db.prepare("INSERT INTO room_events(room_id,reservation_id,actor,action,at) VALUES('MISSING',NULL,'admin','停用教室',?)").run(time),/ROOM_EVENT_ROOM_MISSING/);results.push('無預約的事件仍須連到存在教室');
+assert.throws(()=>db.prepare("INSERT INTO room_events(room_id,reservation_id,actor,action,at) VALUES('R2',?,'admin','測試',?)").run(first.data.id,time),/ROOM_EVENT_RESERVATION_MISMATCH/);results.push('阻擋跨教室事件與預約錯配');
+const ev=db.prepare('SELECT id FROM room_events WHERE reservation_id=?').get(first.data.id);
+assert.throws(()=>db.prepare("UPDATE room_events SET room_id='R2' WHERE id=?").run(ev.id),/ROOM_EVENT_RESERVATION_MISMATCH/);results.push('更新事件仍檢查教室與預約配對');
+assert.throws(()=>db.prepare("UPDATE room_reservations SET room_id='R2' WHERE id=?").run(first.data.id),/ROOM_RESERVATION_IDENTITY_IMMUTABLE/);results.push('預約不得改換教室以破壞歷史事件配對');
+db.prepare("INSERT INTO room_events(room_id,reservation_id,actor,action,at) VALUES('R1',NULL,'admin','開放教室',?)").run(time);results.push('純教室事件可不填預約');
+const filtered=await api('rooms?'+new URLSearchParams({start:slot(15),end:slot(16),people:20,projector:1,accessible:1}),null,student);
+expect('容量與設備篩選',filtered.data.map(x=>x.id),['R1','R4']);
+time=Date.parse(slot(11));const s=await login('student');
+expect('開始時簽到',(await api('room-reservations/'+first.data.id+'/checkin',{},s)).status,200);
+time=Date.parse(slot(12))-1;const nearly=await login('student');
+expect('截止前一毫秒仍計入三筆額度',(await api('room-reservations',{...payload,room_id:'R4',start:slot(15),end:slot(16)},nearly)).status,409);
+time=Date.parse(slot(12));const atEnd=await login('student');
+expect('剛好到結束時間不計入額度',(await api('room-reservations',{...payload,room_id:'R4',start:slot(15),end:slot(16)},atEnd)).status,201);
+const freshDesk=await login('desk');
+expect('櫃台可代辦結束',(await api('room-reservations/'+first.data.id+'/finish',{},freshDesk)).status,200);
+expect('記錄實際櫃台操作者',db.prepare('SELECT actor FROM room_reservations WHERE id=?').get(first.data.id).actor,'desk');
+// A fresh fixture isolates early-finish behavior and failed multi-row closure.
+time=Date.parse('2026-11-09T09:00:00+08:00');
+const fixture=setup();const call=fixture.api;const local=fixture.db;
+const sign=async actor=>(await call('login',{actor,password:'DemoAV-2026'})).data;
+const [a,b,ad,clerk]=await Promise.all(['student','student2','admin','desk'].map(sign));
+await call('rooms',{id:'E1',name:'教室',location:'一樓',capacity:20,projector:1,accessible:1},ad);
+const early=await call('room-reservations',{...payload,room_id:'E1',start:slot(10),end:slot(12)},a);
+time=Date.parse(slot(10));await call('room-reservations/'+early.data.id+'/checkin',{},a);
+time=Date.parse(slot(10,30));await call('room-reservations/'+early.data.id+'/finish',{},a);
+expect('提早結束不改預定結束時間',local.prepare('SELECT end FROM room_reservations WHERE id=?').get(early.data.id).end,Date.parse(slot(12)));
+expect('已結束仍阻擋原時段',(await call('room-reservations',{...payload,room_id:'E1',start:slot(11),end:slot(12)},b)).status,409);
+expect('相鄰時段可預約',(await call('room-reservations',{...payload,room_id:'E1',start:slot(12),end:slot(12,30)},b)).status,201);
+await call('room-reservations',{...payload,room_id:'E1',start:slot(13),end:slot(14)},a);
+local.exec("CREATE TRIGGER fail_second_cancel BEFORE INSERT ON room_events WHEN NEW.action='已取消' AND (SELECT count(*) FROM room_events WHERE action='已取消')=1 BEGIN SELECT RAISE(ABORT,'TEST_CANCEL_ROLLBACK'); END;");
+const beforeEvents=local.prepare('SELECT count(*) n FROM room_events').get().n;
+expect('取消第二筆寫事件失敗回復整次停用',(await call('rooms/E1/status',{status:'停用',note:'教室設備維修'},ad)).status,503);
+expect('停用失敗教室仍開放',local.prepare("SELECT status FROM rooms WHERE id='E1'").get().status,'開放');
+expect('停用失敗兩筆仍預約',local.prepare("SELECT count(*) n FROM room_reservations WHERE status='已預約'").get().n,2);
+expect('停用失敗事件無新增',local.prepare('SELECT count(*) n FROM room_events').get().n,beforeEvents);
+local.exec('DROP TRIGGER fail_second_cancel');
+expect('重新停用成功',(await call('rooms/E1/status',{status:'停用',note:'教室設備維修'},ad)).status,200);
+expect('成功連帶取消兩筆',local.prepare("SELECT count(*) n FROM room_reservations WHERE status='已取消'").get().n,2);
+Date.now=realNow;
+writeFileSync(new URL('../tests/consistency-results.json',import.meta.url),JSON.stringify({passed:results.length,checks:results},null,2));
+console.log('Passed '+results.length+' consistency and boundary checks');

@@ -1,5 +1,7 @@
+import {verifyPassword} from './auth.js';
 import {handleRooms} from './rooms.js';
 import {html} from './page.js';
+import {timeError} from './time-rules.js';
 const demo={student:'學生',student2:'學生',desk:'櫃台',admin:'管理員'};
 const messages={ASSET_UNAVAILABLE:'器材目前維修中或不存在',SLOT_CONFLICT:'此時段已被預約'};
 function reply(data,status=200){return Response.json(data,{status,headers:{'Cache-Control':'no-store'}})}
@@ -12,6 +14,7 @@ function slots(start,end){
 const application = {async fetch(req,env){
  const url=new URL(req.url), path=url.pathname, method=req.method;
  if(path==='/'&&method==='GET') return new Response(html,{headers:{'Content-Type':'text/html;charset=utf-8','X-Content-Type-Options':'nosniff'}});
+ if(path==='/api/version'&&method==='GET')return reply({release:'2026-11-09-security-integrity',schema:'0004_integrity_constraints'});
  if(!path.startsWith('/api/'))return fail('頁面不存在',404);
  if(!env.DB)return fail('共享資料庫尚未配置',503);
  const sql=(q,...args)=>env.DB.prepare(q).bind(...args);
@@ -23,7 +26,7 @@ const application = {async fetch(req,env){
  const body=method==='POST'?await req.json():{};
  if(path==='/api/login'&&method==='POST'){
   const actor=String(body.actor??'').trim().toLowerCase();
-  if(!Object.hasOwn(demo,actor)||body.password!=='DemoAV-2026')return fail('帳號或密碼錯誤',401);
+  if(!(await verifyPassword(actor,body.password))||!Object.hasOwn(demo,actor))return fail('帳號或密碼錯誤',401);
   const token=crypto.randomUUID()+crypto.randomUUID();
   await env.DB.batch([sql('DELETE FROM sessions WHERE expires<=?',now),sql('INSERT INTO sessions VALUES(?,?,?,?)',token,actor,demo[actor],now+7200000),
   sql("INSERT OR IGNORE INTO assets(tag,name,category) VALUES ('CAM-01','Sony 影音相機','相機'),('AUD-01','無線領夾麥克風','收音'),('TRI-01','專業攝影腳架','腳架')")]);
@@ -37,16 +40,39 @@ const application = {async fetch(req,env){
  if(roomResponse)return roomResponse;
  const start=Date.parse(body.start??url.searchParams.get('start')),end=Date.parse(body.end??url.searchParams.get('end'));
  if(method==='GET'){
+  const borrowerRoute=path.match(/^\/api\/desk\/borrowers\/([a-z0-9_-]{1,80})\/loans$/);
+  if(borrowerRoute){
+   if(role!=='櫃台')return fail('沒有此操作的權限',403);
+   const student=borrowerRoute[1];
+   if(demo[student]!=='學生')return fail('查無借用人',404);
+   let cursor=null;
+   if(url.searchParams.has('cursor')){
+    try{cursor=JSON.parse(url.searchParams.get('cursor'));if(!Number.isSafeInteger(cursor.start)||typeof cursor.id!=='string'||!/^[a-f0-9-]{36}$/.test(cursor.id))throw Error()}catch{return fail('紀錄分頁格式錯誤')}
+   }
+   const counts=await one("SELECT COUNT(*) total,COALESCE(SUM(status='已取件'),0) borrowed,COALESCE(SUM(status='已歸還'),0) returned,COALESCE(SUM(status='已取消'),0) cancelled,COALESCE(SUM(status='已預約' AND start+900000>?),0) reserved,COALESCE(SUM(status='已預約' AND start+900000<=?),0) expired FROM loans WHERE student=?",now,now,student);
+   const rows=await list("SELECT l.*,a.name asset_name,a.category FROM loans l JOIN assets a ON a.tag=l.tag WHERE l.student=?"+(cursor?" AND (l.start<? OR (l.start=? AND l.id<?))":"")+" ORDER BY l.start DESC,l.id DESC LIMIT 51",student,...(cursor?[cursor.start,cursor.start,cursor.id]:[]));
+   const more=rows.length>50;const page=rows.slice(0,50);const last=page.at(-1);
+   return reply({borrower:student,...counts,rows:page,next_cursor:more?JSON.stringify({start:last.start,id:last.id}):null});
+  }
+
   if(path==='/api/assets'&&role==='學生'){
-   if(!slots(start,end))return fail('請選擇未來 14 天內同一天 09:00 至 17:00 的半小時時段，長度 30 分鐘至 4 小時');
-   return reply(await list("SELECT a.*,EXISTS(SELECT 1 FROM loans l WHERE l.tag=a.tag AND l.status='已取件' AND l.end<=?) overdue FROM assets a WHERE a.status='可借' AND NOT EXISTS(SELECT 1 FROM loans l WHERE l.tag=a.tag AND l.status<>'已取消' AND l.start<? AND l.end>?) ORDER BY tag LIMIT 50",now,end,start));
+   const issue=timeError(start,end,9,17,14);if(issue)return fail(issue);
+   const category=url.searchParams.get('category')||'';
+   if(category&&!['相機','收音','腳架'].includes(category))return fail('器材類別格式錯誤');
+   return reply(await list("SELECT a.*,EXISTS(SELECT 1 FROM loans l WHERE l.tag=a.tag AND l.status='已取件' AND l.end<=?) overdue FROM assets a WHERE a.status='可借' AND (?='' OR a.category=?) AND NOT EXISTS(SELECT 1 FROM loans l WHERE l.tag=a.tag AND l.status<>'已取消' AND l.start<? AND l.end>?) ORDER BY tag LIMIT 50",now,category,category,end,start));
   }
   if(path==='/api/reservations/me'&&role==='學生')return reply(await list('SELECT * FROM loans WHERE student=? ORDER BY start DESC LIMIT 100',actor));
   if(path==='/api/desk'&&role==='櫃台'){
-   const day=url.searchParams.get('date')||new Date(now+28800000).toISOString().slice(0,10);
-   const t=Date.parse(day+'T00:00:00+08:00');
-   if(!Number.isFinite(t))return fail('日期格式錯誤');
-   return reply(await list("SELECT * FROM loans WHERE status='已取件' OR (status='已預約' AND start>=? AND start<?) OR (status='已歸還' AND returned>=? AND returned<?) ORDER BY start LIMIT 100",t,t+86400000,t,t+86400000));
+   const day=url.searchParams.get('date')||'';
+   const t=day?Date.parse(day+'T00:00:00+08:00'):null;
+   if(day&&(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(t)||new Date(t+28800000).toISOString().slice(0,10)!==day))return fail('日期格式錯誤');
+   let cursor=null;
+   if(url.searchParams.has('cursor')){try{cursor=JSON.parse(url.searchParams.get('cursor'));if(!Number.isSafeInteger(cursor.start)||typeof cursor.id!=='string'||!/^[a-f0-9-]{36}$/.test(cursor.id))throw Error()}catch{return fail('紀錄分頁格式錯誤')}}
+   const where=day?'start>=? AND start<?':'1=1';const args=day?[t,t+86400000]:[];
+   const count=await one('SELECT COUNT(*) total FROM loans WHERE '+where,...args);
+   const rows=await list('SELECT * FROM loans WHERE '+where+(cursor?' AND (start<? OR (start=? AND id<?))':'')+' ORDER BY start DESC,id DESC LIMIT 101',...args,...(cursor?[cursor.start,cursor.start,cursor.id]:[]));
+   const page=rows.slice(0,100);const last=page.at(-1);
+   return reply({total:count.total,rows:page,next_cursor:rows.length>100?JSON.stringify({start:last.start,id:last.id}):null});
   }
   if(path==='/api/maintenance'&&role==='管理員')return reply(await list('SELECT * FROM repairs ORDER BY opened DESC LIMIT 100'));
   if(path==='/api/audit'&&role==='管理員')return reply(await list('SELECT * FROM audit WHERE tag=? ORDER BY id DESC LIMIT 100',url.searchParams.get('tag')??''));
@@ -66,14 +92,14 @@ const application = {async fetch(req,env){
  const remember=sql('INSERT INTO requests VALUES(?,?,?)',actor,key,fingerprint);
  let stmts=[],success=200;
  if(path==='/api/reservations'&&role==='學生'){
-  if(!slots(start,end))return fail('預約時段不符合規則');
+  const issue=timeError(start,end,9,17,14);if(issue)return fail(issue);
   stmts=[sql('INSERT INTO loans(id,tag,student,start,end,actor) VALUES(?,?,?,?,?,?)',id,tag,actor,start,end,actor)];success=201;
  }else if(action){
   const [,loan,op]=action;
   if(role!==(op==='cancel'?'學生':'櫃台'))return fail('沒有此操作的權限',403);
   const current=await one('SELECT * FROM loans WHERE id=?',loan);
   if(!current||(op==='cancel'&&current.student!==actor))return fail('查無預約',404);
-  if(op==='cancel')stmts=[sql("UPDATE loans SET status='已取消',reason='學生取消',actor=? WHERE id=? AND student=? AND status='已預約' AND start>?",actor,loan,actor,now)];
+  if(op==='cancel')stmts=[sql("UPDATE loans SET status='已取消',reason='學生取消',actor=? WHERE id=? AND student=? AND status='已預約' AND start+900000>?",actor,loan,actor,now)];
   if(op==='checkout'){
    if(tag!==current.tag||String(body.student??'').trim().toLowerCase()!==current.student)return fail('學生帳號或器材標籤不符',409);
    stmts=[sql("UPDATE loans SET status='已取件',picked=?,actor=? WHERE id=? AND status='已預約' AND start<=? AND start+900000>? AND EXISTS(SELECT 1 FROM assets WHERE tag=loans.tag AND status='可借') AND NOT EXISTS(SELECT 1 FROM loans x WHERE x.tag=loans.tag AND x.status='已取件')",now,actor,loan,now,now)];

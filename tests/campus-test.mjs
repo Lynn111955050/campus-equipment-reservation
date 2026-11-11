@@ -1,9 +1,9 @@
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
-import worker from './backend.js';
+import worker from '../dist/server/index.js';
 const sqlite=new DatabaseSync(':memory:');
-sqlite.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8'));
+sqlite.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));
 const DB={prepare(q){const s=sqlite.prepare(q);return {bind(...a){return {first:()=>s.get(...a),all:()=>({results:s.all(...a)}),run:()=>s.run(...a)}}}},batch(stmts){sqlite.exec('BEGIN');try{const r=stmts.map(s=>s.run());sqlite.exec('COMMIT');return r}catch(e){sqlite.exec('ROLLBACK');throw e}}};
 const api=async(path,body,user,key=crypto.randomUUID())=>{const res=await worker.fetch(new Request('https://demo.test/api/'+path,{method:body?'POST':'GET',headers:{...(user?{Authorization:'Bearer '+user.token}:{}),'Idempotency-Key':key},body:body?JSON.stringify(body):undefined}),{DB});return {status:res.status,...(await res.json())}};
 const sign=actor=>api('login',{actor,password:'DemoAV-2026'});

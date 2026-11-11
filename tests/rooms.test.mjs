@@ -1,14 +1,16 @@
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
-import worker from './backend.js';
+import worker from '../dist/server/index.js';
 const realNow=Date.now;
 let time=realNow();
 Date.now=()=>time;
 function setup(){
  const db=new DatabaseSync(':memory:');
- db.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8'));
- db.exec(readFileSync(new URL('./rooms.sql',import.meta.url),'utf8'));
+ db.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));
+ db.exec(readFileSync(new URL('../drizzle/0002_rooms.sql',import.meta.url),'utf8'));
+ db.exec(readFileSync(new URL('../drizzle/0003_room_event_integrity.sql',import.meta.url),'utf8'));
+ db.exec(readFileSync(new URL('../drizzle/0004_integrity_constraints.sql',import.meta.url),'utf8'));
  const DB={
   prepare(query){
    const stmt=db.prepare(query);

@@ -1,3 +1,4 @@
+import {timeError} from './time-rules.js';
 const reply = (data, status = 200) => Response.json(data, {status, headers:{'Cache-Control':'no-store'}});
 const fail = (message, status = 400) => reply({error:message}, status);
 
@@ -29,7 +30,7 @@ export async function handleRooms(req, env, user, body) {
    const all = role==='管理員' && url.searchParams.get('all')==='1';
    const start = Date.parse(url.searchParams.get('start'));
    const end = Date.parse(url.searchParams.get('end'));
-   if (!all && !validRoomSlot(start,end,now)) return fail('請選擇未來30天內，同日08:00至22:00、半小時對齊，長度30分鐘至4小時的時段');
+   const issue=all?'':timeError(start,end,8,22,30,now);if(issue)return fail(issue);
    const min = Number(url.searchParams.get('people') || 1);
    if(!Number.isInteger(min)||min<1||min>300) return fail('使用人數須為1至300人的整數');
    const rows = all ? await list("SELECT * FROM rooms ORDER BY id") :
@@ -69,7 +70,7 @@ export async function handleRooms(req, env, user, body) {
   const start=Date.parse(body.start),end=Date.parse(body.end);
   const people=Number(body.people);
   const purpose=String(body.purpose??'').trim();
-  if(!validRoomSlot(start,end,now)) return fail('教室預約時段不符合規則');
+  const issue=timeError(start,end,8,22,30,now);if(issue)return fail(issue);
   if(!Number.isInteger(people)||people<1||people>300||purpose.length<5||purpose.length>200) return fail('請填寫正確人數與5至200字的用途');
   const id=crypto.randomUUID();
   operation=sql('INSERT INTO room_reservations(id,room_id,student,start,end,people,purpose,created,actor) VALUES(?,?,?,?,?,?,?,?,?)',id,String(body.room_id??''),actor,start,end,people,purpose,now,actor);
