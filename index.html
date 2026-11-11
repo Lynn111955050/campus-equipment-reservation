@@ -43,6 +43,20 @@ let user=JSON.parse(sessionStorage.getItem('av-user')||'null'), screen='',select
 const day=(n=0)=>new Date(Date.now()+28800000+n*86400000).toISOString().slice(0,10);
 const fmt=v=>v?new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(v):'—';
 function msg(s,bad=false){notice.textContent=s;notice.className=bad?'bad':'good'}
+function formMessage(formElement,text,bad=false){
+ let feedback=formElement.querySelector('.form-feedback');
+ if(!feedback){
+  feedback=document.createElement('p');
+  feedback.className='form-feedback';
+  feedback.setAttribute('aria-live','polite');
+  feedback.style.gridColumn='1 / -1';
+  formElement.append(feedback);
+ }
+ feedback.textContent=text;
+ feedback.style.color=bad?'#a32727':'#235568';
+ feedback.setAttribute('role',bad?'alert':'status');
+}
+
 async function api(path,body,key){
  const res=await fetch(API_BASE+'/api/'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(user?{Authorization:'Bearer '+user.token}:{}),...(key?{'Idempotency-Key':key}:{})},body:body?JSON.stringify(body):undefined});
  const data=await res.json();
@@ -87,6 +101,10 @@ app.addEventListener('input',e=>{
  const box=document.querySelector('#results');if(box){box.hidden=true;box.innerHTML=''}
  msg('查詢條件已變更，請重新查詢可借資源。');
 });
+app.addEventListener('invalid',e=>{
+ const f=e.target.closest('form');
+ if(f?.dataset.action?.startsWith('room-book/'))formMessage(f,'請填寫使用人數及5至200字的借用用途。',true);
+},true);
 app.addEventListener('invalid',e=>{if(e.target.closest('form')?.dataset.action?.includes('search'))msg('請完整選擇有效的開始與結束時間，再送出查詢。',true)},true);
 
 function logout(){user=null;sessionStorage.removeItem('av-user');render()}
@@ -151,7 +169,7 @@ function roomCard(room,admin=false){
  const meta='<div class="room-meta">'+icon('people')+room.capacity+'人上限'+(room.projector?' · '+icon('projector')+'投影設備':'')+(room.accessible?' · 無障礙動線':'')+'</div>';
  const schedule='<div class="room-schedule" id="schedule-'+escape(room.id)+'"></div>';
  const controls=admin?form('room-status/'+room.id,select('開放狀態','status',['開放','停用'])+field('異動原因','note'),'更新狀態'):
-  form('room-book/'+room.id,field('實際使用人數','people',roomSelection.people||1,'number')+field('借用用途（5至200字）','purpose'),'確認教室預約')+
+  form('room-book/'+room.id,field('實際使用人數','people',roomSelection.people||1,'number').replace(' required',' min="1" max="'+room.capacity+'" step="1" required')+field('借用用途（5至200字）','purpose').replace(' required',' minlength="5" maxlength="200" required'),'確認教室預約')+
   form('room-schedule/'+room.id,'','查看當日占用')+schedule;
  return '<article><div class="room-visual">'+icon('room')+'<span>'+escape(room.id)+'</span></div><h3>'+escape(room.name)+' <span class="badge">'+escape(room.status)+'</span></h3><p class="hint">'+escape(room.location)+'</p>'+meta+(room.note?'<p class="hint">'+escape(room.note)+'</p>':'')+(room.overdue?'<p class="room-alert">上一組逾時未結束，簽到時將再次確認可用狀態。</p>':'')+controls+'</article>';
 }
@@ -227,7 +245,13 @@ async function roomSubmit(op,id,data,formElement){
   return;
  }
  let path,body;
- if(op==='room-book'){path='room-reservations';body={room_id:id,...roomSelection,people:data.people,purpose:data.purpose}}
+ if(op==='room-book'){
+  const people=Number(data.people),purpose=String(data.purpose||'').trim();
+  if(!Number.isInteger(people)||people<1||people>300)throw Error('請填寫有效的使用人數。');
+  if(purpose.length<5||purpose.length>200)throw Error('借用用途請填寫5至200字。');
+  if(!roomSelection.start||!roomSelection.end)throw Error('請先查詢借用時段，再確認預約。');
+  path='room-reservations';body={room_id:id,...roomSelection,people,purpose};
+ }
  else if(op==='room-create'){path='rooms';body={...data,projector:data.projector==='有'?'1':'0',accessible:data.accessible==='有'?'1':'0'}}
  else if(op==='room-status'){path='rooms/'+id+'/status';body=data}
  else{path='room-reservations/'+id+'/'+op.slice(5);body={}}
@@ -236,7 +260,8 @@ async function roomSubmit(op,id,data,formElement){
  await api(path,body,formElement.dataset.key);
  if(op==='room-book')screen='我的教室';
  render();
- msg('操作成功');
+ msg(op==='room-book'?'教室預約成功，請在「我的教室」查看預約紀錄。':'操作成功');
+ if(op==='room-book')notice.scrollIntoView({behavior:'smooth',block:'center'});
 }
 
 function render(){
@@ -280,6 +305,7 @@ app.addEventListener('submit',async e=>{
  e.preventDefault();
  const f=e.target, b=f.querySelector('button'), data=Object.fromEntries(new FormData(f)),[op,id]=f.dataset.action.split('/');
  b.disabled=true;msg('');
+ if(op==='room-book')formMessage(f,'正在送出教室預約…');
  try{
  if(op.startsWith('room-')){await roomSubmit(op,id,data,f);return}
  if(op==='login'){user=await api('login',data);sessionStorage.setItem('av-user',JSON.stringify(user));render();return}
@@ -292,7 +318,7 @@ app.addEventListener('submit',async e=>{
  await api(path,body,f.dataset.key);
  if(op==='book')screen='我的預約';
  render();msg('操作成功');
- }catch(error){msg(error.message,true)}finally{b.disabled=false}
+ }catch(error){const message=error.message||'操作失敗，請稍後再試。';msg(message,true);if(op==='room-book')formMessage(f,message,true)}finally{b.disabled=false}
 });
 render();
 
