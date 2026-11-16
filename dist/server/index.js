@@ -69,11 +69,15 @@ const application = {async fetch(req,env){
  if(roomResponse)return roomResponse;
  const start=Date.parse(body.start??url.searchParams.get('start')),end=Date.parse(body.end??url.searchParams.get('end'));
  if(method==='GET'){
-  const borrowerRoute=path.match(/^\/api\/desk\/borrowers\/([a-z0-9_-]{1,80})\/loans$/);
+  const borrowerRoute=path.match(/^\/api\/desk\/borrowers\/([^/]+)\/loans$/);
   if(borrowerRoute){
    if(role!=='櫃台')return fail('沒有此操作的權限',403);
-   const student=borrowerRoute[1];
-   if(!await one("SELECT id FROM users WHERE account=? AND role='學生'",student))return fail('查無借用人',404);
+   let student;
+   try{student=decodeURIComponent(borrowerRoute[1])}catch{return fail('借用人帳號格式錯誤')}
+   if(!student||student.length>80)return fail('借用人帳號格式錯誤');
+   const known=await one("SELECT id FROM users WHERE account=? AND role='學生'",student);
+   const historical=known?null:await one('SELECT id FROM loans WHERE student=? LIMIT 1',student);
+   if(!known&&!historical)return fail('查無借用人',404);
    let cursor=null;
    if(url.searchParams.has('cursor')){
     try{cursor=JSON.parse(url.searchParams.get('cursor'));if(!Number.isSafeInteger(cursor.start)||typeof cursor.id!=='string'||!/^[a-f0-9-]{36}$/.test(cursor.id))throw Error()}catch{return fail('紀錄分頁格式錯誤')}

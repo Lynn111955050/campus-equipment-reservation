@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-16T14:44:35.897Z",
+  "date": "2026-11-16T14:53:36.201Z",
   "node": "v24.22.1",
   "tests": [
     {
@@ -50,7 +50,7 @@
     {
       "test": "user-audit.test",
       "exit_code": 0,
-      "sha256": "0a7abb7aacbb82d7bcf5919bf3a36168c03c46e8b5e36827ef71be1286bcfdff"
+      "sha256": "e69ebde0b0d35b6aebbcae45793203be0b3becb8baa825232760c44593064101"
     },
     {
       "test": "conflict-ui.test",

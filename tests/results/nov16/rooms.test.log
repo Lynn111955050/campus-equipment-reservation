@@ -6,7 +6,7 @@ Error: TEST_AUDIT_FAILURE
     at Object.batch (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/tests/rooms.test.mjs:23:32)
     at handleRooms (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/dist/server/rooms.js:114:16)
     at async Object.fetch (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/dist/server/index.js:68:21)
-    at async Object.fetch (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/dist/server/index.js:176:17)
+    at async Object.fetch (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/dist/server/index.js:180:17)
     at async api (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/tests/rooms.test.mjs:28:18)
     at async file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/tests/rooms.test.mjs:80:15 {
   code: 'ERR_SQLITE_ERROR',

@@ -29,4 +29,7 @@ check(()=>assert(db.prepare('SELECT user_id FROM sessions WHERE token=?').get(lo
 db.exec("UPDATE users SET active=0 WHERE account='student'");check(()=>assert.equal((db.prepare("SELECT active FROM users WHERE account='student'").get()).active,0));
 const denied=await call('reservations/me',undefined,login.data.token);check(()=>assert.equal(denied.status,401));
 const reLogin=await call('login',{actor:'student',password:'DemoAV-2026'});check(()=>assert.equal(reLogin.status,401));
+const desk=await call('login',{actor:'desk',password:'DemoAV-2026'});
+const history=await call('desk/borrowers/'+encodeURIComponent('已畢業學生')+'/loans',undefined,desk.data.token);
+check(()=>assert.equal(history.status,200));check(()=>assert.equal(history.data.total,1));check(()=>assert.equal(history.data.rows[0].id,'OLD'));
 console.log('Passed '+checks+' user, audit foreign-key and historical migration checks');
