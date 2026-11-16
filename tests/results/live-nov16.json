@@ -1,0 +1,53 @@
+{
+  "date": "2026-11-16",
+  "checks": [
+    {
+      "test": "online_release",
+      "status": 200,
+      "release": {
+        "release": "2026-11-16-user-audit-security",
+        "schema": "0006_user_audit_links"
+      }
+    },
+    {
+      "test": "invalid_json",
+      "status": 400
+    },
+    {
+      "test": "login_student",
+      "status": 200
+    },
+    {
+      "test": "login_student2",
+      "status": 200
+    },
+    {
+      "test": "login_desk",
+      "status": 200
+    },
+    {
+      "test": "login_admin",
+      "status": 200
+    },
+    {
+      "test": "invalid_calendar_date",
+      "status": 400
+    },
+    {
+      "test": "invalid_request_key",
+      "status": 400
+    },
+    {
+      "test": "logout",
+      "status": 200
+    },
+    {
+      "test": "revoked_token",
+      "status": 401
+    },
+    {
+      "test": "login_rate_limit_unknown_test_account",
+      "status": 429
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
+const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];new vm.Script(script);
+let calls=[],content='',message='';const conflict=()=>Object.assign(Error('此時段已被預約'),{status:409});
+const roomFn=script.slice(script.indexOf('async function roomSubmit'),script.indexOf('\nfunction render()',script.indexOf('async function roomSubmit')));
+const c=vm.createContext({URLSearchParams,crypto,roomSelection:{start:'2026-11-18T10:00:00+08:00',end:'2026-11-18T11:00:00+08:00'},lastRoomQuery:'start=test',screen:'教室預約',roomCard:r=>r.name,roomResults:(t,s)=>content=s,api:async(path)=>{calls.push(path);if(path==='room-reservations')throw conflict();return [{name:'其他可借教室'}]}});vm.runInContext(roomFn,c);
+await assert.rejects(()=>c.roomSubmit('room-book','R1',{people:'2',purpose:'小組專題討論'},{dataset:{}}),/已重新查詢/);assert.equal(content,'其他可借教室');assert.equal(calls.length,2);
+calls=[];let listener;const button={disabled:false};const form={dataset:{action:'book/CAM-01'},querySelector:()=>button};
+const handler=script.slice(script.indexOf("app.addEventListener('submit',async e=>{"),script.indexOf('\nrender();',script.indexOf("app.addEventListener('submit',async e=>{")));
+const a=vm.createContext({app:{addEventListener:(event,fn)=>listener=fn},FormData:class{*[Symbol.iterator](){}},crypto,selection:{start:'s',end:'e'},lastAssetQuery:'start=test',screen:'查詢器材',api:async(path)=>{calls.push(path);if(path==='reservations')throw conflict();return [{tag:'CAM-02'}]},renderAssetResults:r=>content=r[0].tag,msg:m=>message=m});vm.runInContext(handler,a);
+await listener({preventDefault(){},target:form});assert.equal(content,'CAM-02');assert.match(message,/已重新查詢可借器材/);assert.equal(button.disabled,false);assert.equal(calls.length,2);
+console.log('Passed actual equipment and classroom conflict refresh handlers');

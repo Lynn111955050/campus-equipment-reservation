@@ -29,6 +29,20 @@
       "when": 1794180000000,
       "tag": "0004_integrity_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794355200000,
+      "tag": "0005_session_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794837600000,
+      "tag": "0006_user_audit_links",
+      "breakpoints": true
     }
   ]
 }

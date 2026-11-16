@@ -60,8 +60,8 @@ function formMessage(formElement,text,bad=false){
 async function api(path,body,key){
  const res=await fetch(API_BASE+'/api/'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(user?{Authorization:'Bearer '+user.token}:{}),...(key?{'Idempotency-Key':key}:{})},body:body?JSON.stringify(body):undefined});
  const data=await res.json();
- if(res.status===401&&user){logout();throw Error(data.error)}
- if(!res.ok)throw Error(data.error);
+ if(res.status===401&&user){clearSession();throw Error(data.error)}
+ if(!res.ok){const error=new Error(data.error||'操作失敗，請稍後再試');error.status=res.status;throw error;}
  return data;
 }
 
@@ -78,6 +78,9 @@ function timeError(start,end,opening,closing,maxDays,now=Date.now()) {
  return '';
 }
 let searchRevision=0;
+let lastAssetQuery='';
+function renderAssetResults(rows){document.querySelector('#results').hidden=false;results('可借器材',rows.map(x=>'<article>'+gearVisual(x.category)+'<span class="badge">'+icon(x.category==='相機'?'camera':x.category==='收音'?'mic':'tripod')+' '+escape(x.category)+'</span><h3>'+escape(x.name)+'</h3><p class="cardtag">'+escape(x.tag)+(x.overdue?' · 前一筆逾期未還':'')+'</p>'+form('book/'+encodeURIComponent(x.tag),'','預約這件')+'</article>').join(''))}
+
 function searchFormIssue(f){
  const room=f.dataset.action==='room-search';
  const a=f.elements[room?'room_start':'start'],b=f.elements[room?'room_end':'end'];
@@ -107,7 +110,11 @@ app.addEventListener('invalid',e=>{
 },true);
 app.addEventListener('invalid',e=>{if(e.target.closest('form')?.dataset.action?.includes('search'))msg('請完整選擇有效的開始與結束時間，再送出查詢。',true)},true);
 
-function logout(){user=null;sessionStorage.removeItem('av-user');render()}
+function clearSession(){user=null;sessionStorage.removeItem('av-user');render()}
+async function logout(){
+ try{await api('logout',{});clearSession();msg('已登出，工作階段已撤銷。')}
+ catch(error){msg(error.message||'登出失敗，請稍後再試。',true)}
+}
 function field(label,name,value='',type='text'){return '<label>'+label+'<input name="'+name+'" type="'+type+'" value="'+escape(value)+'" required></label>'}
 function select(label,name,values){return '<label>'+label+'<select name="'+name+'">'+values.map(v=>'<option>'+v+'</option>').join('')+'</select></label>'}
 function form(action,fields,label){const op=action.split('/')[0];const key=({login:'lock',search:'search',book:'calendar',cancel:'back',checkout:'box',return:'check',asset:'plus',audit:'history',close:'check',desk:'clipboard'})[op]||'check';return '<form data-action="'+action+'">'+fields+'<button>'+icon(key)+label+'</button></form>'}
@@ -139,6 +146,7 @@ function loan(l, desk) {
 }
 function results(title,content){document.querySelector('#results').innerHTML='<div class="section-heading">'+icon('box')+'<h2>'+title+'</h2></div><div class="grid">'+(content||'<div class="empty">'+icon('clipboard')+'目前沒有符合的紀錄。</div>')+'</div>'}
 let roomSelection = {};
+let lastRoomQuery='';
 let roomBookings = new Map();
 const roomIcons = {room:'<path d="M4 21V3h16v18M9 21v-6h6v6M7 7h2m6 0h2M7 11h2m6 0h2"/>',people:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m1-17a3 3 0 0 1 0 6m2 5a5 5 0 0 1 3 4v2"/>',projector:'<path d="M3 4h18v12H3zM12 16v5m-4 0h8M7 8h10m-10 4h5"/>',accessible:'<circle cx="12" cy="4" r="2"/><path d="M12 7v6h5l3 6M12 10H7m-1 3a5 5 0 1 0 8 6"/>'};
 Object.assign(iconPaths,roomIcons);
@@ -213,6 +221,7 @@ async function roomSubmit(op,id,data,formElement){
   if(box){box.hidden=false;box.innerHTML='<p role="status">正在查詢可借教室…</p>'}
   roomSelection={start:roomDateTime(data.room_start),end:roomDateTime(data.room_end),people:data.people};
   const query=new URLSearchParams({...roomSelection,projector:data.projector==='需要'?'1':'0',accessible:data.accessible==='需要'?'1':'0'});
+  lastRoomQuery=query.toString();
   let rooms;
   try{
    rooms=await api('rooms?'+query);
@@ -257,7 +266,17 @@ async function roomSubmit(op,id,data,formElement){
  else{path='room-reservations/'+id+'/'+op.slice(5);body={}}
  const signature=JSON.stringify({path,body});
  if(formElement.dataset.signature!==signature){formElement.dataset.signature=signature;formElement.dataset.key=crypto.randomUUID()}
- await api(path,body,formElement.dataset.key);
+ try{await api(path,body,formElement.dataset.key)}
+ catch(error){
+  if(op==='room-book'&&error.status===409&&error.message.includes('時段已被預約')&&lastRoomQuery){
+   try{
+    const rooms=await api('rooms?'+lastRoomQuery);
+    if(screen==='教室預約')roomResults('可借教室',rooms.length?rooms.map(room=>roomCard(room)).join(''):'<p class="empty" role="status">目前無空教室可借用</p>');
+    error.message+='。已重新查詢可借教室，請選擇其他教室或時段。';
+   }catch{error.message+='。重新查詢失敗，請按「查詢可借教室」再試。'}
+  }
+  throw error;
+ }
  if(op==='room-book')screen='我的教室';
  render();
  msg(op==='room-book'?'教室預約成功，請在「我的教室」查看預約紀錄。':'操作成功');
@@ -309,7 +328,7 @@ app.addEventListener('submit',async e=>{
  try{
  if(op.startsWith('room-')){await roomSubmit(op,id,data,f);return}
  if(op==='login'){user=await api('login',data);sessionStorage.setItem('av-user',JSON.stringify(user));render();return}
- if(op==='search'){const issue=searchFormIssue(f);if(issue)throw Error(issue);const revision=++searchRevision;const prior=document.querySelector('#results');if(prior){prior.hidden=true;prior.innerHTML=''}selection={start:data.start+':00+08:00',end:data.end+':00+08:00'};const query={...selection,...(data.category==='全部類別'?{}:{category:data.category})};const all=await api('assets?'+new URLSearchParams(query));if(revision!==searchRevision||screen!=='查詢器材')return;const rows=all;document.querySelector('#results').hidden=false;results('可借器材',rows.map(x=>'<article>'+gearVisual(x.category)+'<span class="badge">'+icon(x.category==='相機'?'camera':x.category==='收音'?'mic':'tripod')+' '+escape(x.category)+'</span><h3>'+escape(x.name)+'</h3><p class="cardtag">'+escape(x.tag)+(x.overdue?' · 前一筆逾期未還':'')+'</p>'+form('book/'+encodeURIComponent(x.tag),'','預約這件')+'</article>').join(''));return}
+ if(op==='search'){const issue=searchFormIssue(f);if(issue)throw Error(issue);const revision=++searchRevision;const prior=document.querySelector('#results');if(prior){prior.hidden=true;prior.innerHTML=''}selection={start:data.start+':00+08:00',end:data.end+':00+08:00'};const query={...selection,...(data.category==='全部類別'?{}:{category:data.category})};lastAssetQuery=new URLSearchParams(query).toString();const all=await api('assets?'+lastAssetQuery);if(revision!==searchRevision||screen!=='查詢器材')return;const rows=all;renderAssetResults(rows);return}
  if(op==='desk'){selection.date=data.date;await loadDesk(data.date);return}
  if(op==='audit'){const rows=await api('audit?tag='+encodeURIComponent(data.tag.trim().toUpperCase()));document.querySelector('#results').hidden=false;results('異動紀錄',rows.map(x=>'<article><h3>'+escape(x.action)+'</h3><p>'+fmt(x.at)+' · '+escape(x.actor)+'</p></article>').join(''));return}
  const path=op==='book'?'reservations':op==='asset'?'assets':op==='close'?'maintenance/'+id+'/close':'reservations/'+id+'/'+op;
@@ -318,7 +337,15 @@ app.addEventListener('submit',async e=>{
  await api(path,body,f.dataset.key);
  if(op==='book')screen='我的預約';
  render();msg('操作成功');
- }catch(error){const message=error.message||'操作失敗，請稍後再試。';msg(message,true);if(op==='room-book')formMessage(f,message,true)}finally{b.disabled=false}
+  }catch(error){
+  if(op==='book'&&error.status===409&&error.message.includes('時段已被預約')&&lastAssetQuery){
+   try{
+    const rows=await api('assets?'+lastAssetQuery);
+    if(screen==='查詢器材')renderAssetResults(rows);
+    error.message+='。已重新查詢可借器材，請選擇其他器材或時段。';
+   }catch{error.message+='。重新查詢失敗，請再按「查詢可借器材」。'}
+  }
+  const message=error.message||'操作失敗，請稍後再試。';msg(message,true);if(op==='room-book')formMessage(f,message,true)}finally{b.disabled=false}
 });
 render();
 

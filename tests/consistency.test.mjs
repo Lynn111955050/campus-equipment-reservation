@@ -9,7 +9,7 @@ const results=[];
 function expect(label,actual,wanted){assert.deepEqual(actual,wanted,label);results.push(label)}
 function setup(){
  const db=new DatabaseSync(':memory:');
- for(const f of ['../migrations/0001_initial.sql','../drizzle/0002_rooms.sql','../drizzle/0003_room_event_integrity.sql','../drizzle/0004_integrity_constraints.sql'])db.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ for(const f of ['../migrations/0001_initial.sql','../drizzle/0002_rooms.sql','../drizzle/0003_room_event_integrity.sql','../drizzle/0004_integrity_constraints.sql','../drizzle/0005_session_security.sql','../drizzle/0006_user_audit_links.sql'])db.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
  const DB={prepare(q){const stmt=db.prepare(q);return {bind(...a){return {first:()=>stmt.get(...a),all:()=>({results:stmt.all(...a)}),run:()=>stmt.run(...a)}}}},batch(stmts){db.exec('BEGIN');try{const result=stmts.map(s=>s.run());db.exec('COMMIT');return result}catch(e){db.exec('ROLLBACK');throw e}}};
  const api=async(path,body,user,key=crypto.randomUUID())=>{
   const r=await worker.fetch(new Request('https://test.example/api/'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(user?{Authorization:'Bearer '+user.token}:{}),'Idempotency-Key':key},body:body?JSON.stringify(body):undefined}),{DB});
@@ -60,7 +60,7 @@ expect('相鄰時段可預約',(await call('room-reservations',{...payload,room_
 await call('room-reservations',{...payload,room_id:'E1',start:slot(13),end:slot(14)},a);
 local.exec("CREATE TRIGGER fail_second_cancel BEFORE INSERT ON room_events WHEN NEW.action='已取消' AND (SELECT count(*) FROM room_events WHERE action='已取消')=1 BEGIN SELECT RAISE(ABORT,'TEST_CANCEL_ROLLBACK'); END;");
 const beforeEvents=local.prepare('SELECT count(*) n FROM room_events').get().n;
-expect('取消第二筆寫事件失敗回復整次停用',(await call('rooms/E1/status',{status:'停用',note:'教室設備維修'},ad)).status,503);
+expect('取消第二筆寫事件失敗回復整次停用',(await call('rooms/E1/status',{status:'停用',note:'教室設備維修'},ad)).status,500);
 expect('停用失敗教室仍開放',local.prepare("SELECT status FROM rooms WHERE id='E1'").get().status,'開放');
 expect('停用失敗兩筆仍預約',local.prepare("SELECT count(*) n FROM room_reservations WHERE status='已預約'").get().n,2);
 expect('停用失敗事件無新增',local.prepare('SELECT count(*) n FROM room_events').get().n,beforeEvents);

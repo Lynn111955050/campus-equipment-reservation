@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-16T14:44:35.897Z",
+  "node": "v24.22.1",
+  "tests": [
+    {
+      "test": "campus-test",
+      "exit_code": 0,
+      "sha256": "7c874f98f0cb461c3d4c94703362df9fe1386d14db998fbca2ad3d743afbadb4"
+    },
+    {
+      "test": "rooms.test",
+      "exit_code": 0,
+      "sha256": "f63982114b39697725b36f847187e58764eeeaa03761917df690dd765c4b862d"
+    },
+    {
+      "test": "consistency.test",
+      "exit_code": 0,
+      "sha256": "27cbf429921cc020cbfb5b94ed14d4b4e403fe3c5bbb0265ad17b848d209d895"
+    },
+    {
+      "test": "desk-history.test",
+      "exit_code": 0,
+      "sha256": "707558fa39d42a18f6ae7d104c6c6a4faa076442ea6158ce6d2c77c645aea22e"
+    },
+    {
+      "test": "expiry-borrower.test",
+      "exit_code": 0,
+      "sha256": "768cd4faa1ae11db5edb4ae10d301b5660473fadf8bff5043cdd8ad9ff041d26"
+    },
+    {
+      "test": "history-ui.test",
+      "exit_code": 0,
+      "sha256": "e4e88de3845e9f18b255a506de674c2b750c77d541475aae2376dee1793f432c"
+    },
+    {
+      "test": "search-time.test",
+      "exit_code": 0,
+      "sha256": "d3590e533de7c5d7197dd03ea97685a080510913e48b22720d69b066385be468"
+    },
+    {
+      "test": "security-integrity.test",
+      "exit_code": 0,
+      "sha256": "09b2ee99c7300fb0eaf6e58d22fd37c7fe532a53bb9c5cbadb05c3467df2fe93"
+    },
+    {
+      "test": "teacher-review.test",
+      "exit_code": 0,
+      "sha256": "12cf7b4624f34b74044c78779d92232a96565110ad651081e6845f19a56293b4"
+    },
+    {
+      "test": "user-audit.test",
+      "exit_code": 0,
+      "sha256": "0a7abb7aacbb82d7bcf5919bf3a36168c03c46e8b5e36827ef71be1286bcfdff"
+    },
+    {
+      "test": "conflict-ui.test",
+      "exit_code": 0,
+      "sha256": "d2544fc26a34618bd3dc2d6e60008bdc06c51151169cd6364cbdcf99c58a743a"
+    }
+  ]
+}

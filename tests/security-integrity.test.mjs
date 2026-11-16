@@ -8,7 +8,7 @@ const check=(fn)=>{fn();checks++};
 const oldSchema=db=>{for(const f of ['0001_initial','0002_rooms','0003_room_event_integrity'])db.exec(readFileSync(new URL('../drizzle/'+f+'.sql',import.meta.url),'utf8'))};
 const migration=readFileSync(new URL('../drizzle/0004_integrity_constraints.sql',import.meta.url),'utf8');
 const db=new DatabaseSync(':memory:');db.exec('PRAGMA foreign_keys=ON');oldSchema(db);
-db.exec("INSERT INTO assets VALUES('A','相機A','相機','可借'),('B','相機B','相機','可借'); INSERT INTO loans(id,tag,student,start,end,actor) VALUES('L','A','student',1,2,'student'); UPDATE loans SET status='已歸還',picked=1,returned=2 WHERE id='L'; INSERT INTO repairs VALUES('P','A','L','測試故障',3,NULL,NULL); INSERT INTO rooms VALUES('R','教室','大樓',40,1,1,'開放','','admin'); INSERT INTO room_reservations VALUES('RR','R','student',10,20,5,'測試小組討論','已預約',NULL,NULL,NULL,1,'student'); INSERT INTO room_events(room_id,actor,action,at) VALUES('R','admin','開放教室',1); INSERT INTO sessions VALUES('T','student','學生',999); INSERT INTO requests VALUES('student','K','F');");
+db.exec("INSERT INTO assets VALUES('A','相機A','相機','可借'),('B','相機B','相機','可借'); INSERT INTO loans(id,tag,student,start,end,actor) VALUES('L','A','student',1,2,'student'); UPDATE loans SET status='已歸還',picked=1,returned=2 WHERE id='L'; INSERT INTO repairs VALUES('P','A','L','測試故障',3,NULL,NULL); INSERT INTO rooms(id,name,location,capacity,projector,accessible,status,note,actor) VALUES('R','教室','大樓',40,1,1,'開放','','admin'); INSERT INTO room_reservations VALUES('RR','R','student',10,20,5,'測試小組討論','已預約',NULL,NULL,NULL,1,'student'); INSERT INTO room_events(room_id,actor,action,at) VALUES('R','admin','開放教室',1); INSERT INTO sessions VALUES('T','student','學生',999); INSERT INTO requests VALUES('student','K','F');");
 const tables=['assets','loans','repairs','audit','requests','sessions','rooms','room_reservations','room_events'];
 const snapshot=()=>Object.fromEntries(tables.map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));
 const before=snapshot();db.exec('BEGIN');try{db.exec(migration);db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}
@@ -34,6 +34,8 @@ for(const actor of ['student','student2','desk','admin']){
  assert.equal(await verifyPassword(actor,'wrong'),false);checks++;
 }
 assert.equal(await verifyPassword('missing','DemoAV-2026'),false);checks++;
+db.exec(readFileSync(new URL('../drizzle/0005_session_security.sql',import.meta.url),'utf8'));
+db.exec(readFileSync(new URL('../drizzle/0006_user_audit_links.sql',import.meta.url),'utf8'));
 const DB={prepare(q){const s=db.prepare(q);return {bind(...a){return {first:()=>s.get(...a),all:()=>({results:s.all(...a)}),run:()=>s.run(...a)}}}},batch(stmts){db.exec('BEGIN');try{const r=stmts.map(s=>s.run());db.exec('COMMIT');return r}catch(e){db.exec('ROLLBACK');throw e}}};
 const api=async(path,body,token)=>{const r=await worker.fetch(new Request('https://test.example/api/'+path,{method:body?'POST':'GET',headers:token?{Authorization:'Bearer '+token}:{},body:body?JSON.stringify(body):undefined}),{DB});return {status:r.status,data:await r.json()}};
 const login=await api('login',{actor:' STUDENT ',password:'DemoAV-2026'});check(()=>assert.equal(login.status,200));

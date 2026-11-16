@@ -9,7 +9,7 @@ const results=[];
 function expect(label,actual,wanted){assert.deepEqual(actual,wanted,label);results.push(label)}
 function setup(){
  const db=new DatabaseSync(':memory:');
- for(const f of ['../migrations/0001_initial.sql','../drizzle/0002_rooms.sql','../drizzle/0003_room_event_integrity.sql','../drizzle/0004_integrity_constraints.sql'])db.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ for(const f of ['../migrations/0001_initial.sql','../drizzle/0002_rooms.sql','../drizzle/0003_room_event_integrity.sql','../drizzle/0004_integrity_constraints.sql','../drizzle/0005_session_security.sql','../drizzle/0006_user_audit_links.sql'])db.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
  const DB={prepare(q){const stmt=db.prepare(q);return {bind(...a){return {first:()=>stmt.get(...a),all:()=>({results:stmt.all(...a)}),run:()=>stmt.run(...a)}}}},batch(stmts){db.exec('BEGIN');try{const result=stmts.map(s=>s.run());db.exec('COMMIT');return result}catch(e){db.exec('ROLLBACK');throw e}}};
  const api=async(path,body,user,key=crypto.randomUUID())=>{
   const r=await worker.fetch(new Request('https://test.example/api/'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(user?{Authorization:'Bearer '+user.token}:{}),'Idempotency-Key':key},body:body?JSON.stringify(body):undefined}),{DB});

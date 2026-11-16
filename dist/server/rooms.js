@@ -1,4 +1,4 @@
-import {timeError} from './time-rules.js';
+import {timeError,validCalendarDate,validRequestKey} from './time-rules.js';
 const reply = (data, status = 200) => Response.json(data, {status, headers:{'Cache-Control':'no-store'}});
 const fail = (message, status = 400) => reply({error:message}, status);
 
@@ -23,7 +23,10 @@ export async function handleRooms(req, env, user, body) {
  const one = (query,...args) => sql(query,...args).first();
  const list = async (query,...args) => (await sql(query,...args).all()).results;
  // Expiry is a deterministic maintenance step and preserves each reservation's history.
- await sql("UPDATE room_reservations SET status='未簽到',reason='超過開始後15分鐘未簽到',actor='系統' WHERE status='已預約' AND start+900000<=?",now).run();
+ const cleanupStarted=performance.now();
+ const cleanup=await sql("UPDATE room_reservations SET status='未簽到',reason='超過開始後15分鐘未簽到',actor='系統' WHERE status='已預約' AND start<=?",now-900000).run();
+ const cleanupMs=performance.now()-cleanupStarted;
+ if(cleanupMs>=100)console.warn(JSON.stringify({event:'room_expiry_slow',duration_ms:Math.round(cleanupMs),changed_rows:cleanup.meta?.changes??cleanup.changes??null}));
  const get = req.method==='GET';
  if (get) {
   if (path==='/api/rooms') {
@@ -41,7 +44,7 @@ export async function handleRooms(req, env, user, body) {
   if(schedule) {
    if(!await one('SELECT id FROM rooms WHERE id=?',schedule[1])) return fail('查無教室',404);
    const date = url.searchParams.get('date') || '';
-   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('日期格式錯誤');
+   if(!validCalendarDate(date)) return fail('日期格式錯誤');
    const begin = Date.parse(date+'T00:00:00+08:00');
    return reply(await list("SELECT start,end,status FROM room_reservations WHERE room_id=? AND start>=? AND start<? AND status IN ('已預約','使用中','已結束') ORDER BY start",schedule[1],begin,begin+86400000));
   }
@@ -50,7 +53,7 @@ export async function handleRooms(req, env, user, body) {
   }
   if(path==='/api/room-reservations' && ['櫃台','管理員'].includes(role)) {
    const date = url.searchParams.get('date') || new Date(now+28800000).toISOString().slice(0,10);
-   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('日期格式錯誤');
+   if(!validCalendarDate(date)) return fail('日期格式錯誤');
    const begin = Date.parse(date+'T00:00:00+08:00');
    return reply(await list("SELECT b.*,r.name,r.location,r.capacity FROM room_reservations b JOIN rooms r ON r.id=b.room_id WHERE (b.start>=? AND b.start<?) OR b.status='使用中' ORDER BY b.start DESC LIMIT 100",begin,begin+86400000));
   }
@@ -58,7 +61,7 @@ export async function handleRooms(req, env, user, body) {
  }
  if(req.method!=='POST') return fail('方法不支援',405);
  const key = req.headers.get('Idempotency-Key') || '';
- if(!/^[a-f0-9-]{36}$/i.test(key)) return fail('缺少請求識別碼');
+ if(!validRequestKey(key)) return fail('請求識別碼須為有效的 UUID v4');
  const digest = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(path+JSON.stringify(body)));
  const fingerprint = Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
  const previous = await one('SELECT fingerprint FROM requests WHERE actor=? AND key=?',actor,key);

@@ -1,7 +1,8 @@
+import {initializeUsers} from './users.js';
 import {verifyPassword} from './auth.js';
 import {handleRooms} from './rooms.js';
 import {html} from './page.js';
-import {timeError} from './time-rules.js';
+import {timeError,validCalendarDate,validRequestKey} from './time-rules.js';
 const demo={student:'學生',student2:'學生',desk:'櫃台',admin:'管理員'};
 const messages={ASSET_UNAVAILABLE:'器材目前維修中或不存在',SLOT_CONFLICT:'此時段已被預約'};
 function reply(data,status=200){return Response.json(data,{status,headers:{'Cache-Control':'no-store'}})}
@@ -14,7 +15,7 @@ function slots(start,end){
 const application = {async fetch(req,env){
  const url=new URL(req.url), path=url.pathname, method=req.method;
  if(path==='/'&&method==='GET') return new Response(html,{headers:{'Content-Type':'text/html;charset=utf-8','X-Content-Type-Options':'nosniff'}});
- if(path==='/api/version'&&method==='GET')return reply({release:'2026-11-09-security-integrity',schema:'0004_integrity_constraints'});
+ if(path==='/api/version'&&method==='GET')return reply({release:'2026-11-16-user-audit-security',schema:'0006_user_audit_links'});
  if(!path.startsWith('/api/'))return fail('頁面不存在',404);
  if(!env.DB)return fail('共享資料庫尚未配置',503);
  const sql=(q,...args)=>env.DB.prepare(q).bind(...args);
@@ -23,18 +24,46 @@ const application = {async fetch(req,env){
  const now=Date.now();
  try {
  if(method==='POST'&&req.headers.get('Origin')&&req.headers.get('Origin')!==url.origin&&req.headers.get('Origin')!=='https://lynn111955050.github.io')return fail('來源不符',403);
- const body=method==='POST'?await req.json():{};
+ let body={};
+ if(method==='POST'){
+  try{body=await req.json()}catch{return fail('請求內容須為有效的 JSON 物件',400)}
+  if(!body||typeof body!=='object'||Array.isArray(body))return fail('請求內容須為 JSON 物件',400);
+ }
  if(path==='/api/login'&&method==='POST'){
   const actor=String(body.actor??'').trim().toLowerCase();
-  if(!(await verifyPassword(actor,body.password))||!Object.hasOwn(demo,actor))return fail('帳號或密碼錯誤',401);
+  const source=req.headers.get('CF-Connecting-IP')||'unknown';
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([actor,source])));
+  const scope=Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
+  const limited=()=>new Response(JSON.stringify({error:'登入失敗次數過多，請15分鐘後再試'}),{status:429,headers:{'Content-Type':'application/json','Cache-Control':'no-store','Retry-After':'900'}});
+  await sql('DELETE FROM login_attempts WHERE window_start<=? AND locked_until<=?',now-900000,now).run();
+  const attempt=await one('SELECT locked_until FROM login_attempts WHERE scope=?',scope);
+  if(attempt?.locked_until>now)return limited();
+  if(!(await verifyPassword(actor,body.password))||!Object.hasOwn(demo,actor)){
+   await sql(`INSERT INTO login_attempts(scope,failures,window_start,locked_until) VALUES(?,1,?,0)
+    ON CONFLICT(scope) DO UPDATE SET
+    failures=CASE WHEN window_start<=? THEN 1 ELSE failures+1 END,
+    locked_until=CASE WHEN window_start>? AND failures+1>=5 THEN max(locked_until,?+900000) ELSE 0 END,
+    window_start=CASE WHEN window_start<=? THEN ? ELSE window_start END`,scope,now,now-900000,now-900000,now,now-900000,now).run();
+   return fail('帳號或密碼錯誤',401);
+  }
+  const afterVerify=await one('SELECT locked_until FROM login_attempts WHERE scope=?',scope);
+  if(afterVerify?.locked_until>now)return limited();
+  await env.DB.batch([sql('DELETE FROM login_attempts WHERE scope=?',scope),sql('DELETE FROM login_attempts WHERE window_start<=? AND locked_until<=?',now-900000,now)]);
+  await initializeUsers(env,demo,now);
+  const account=await one('SELECT id,role,active FROM users WHERE account=?',actor);
+  if(!account||!account.active)return fail('帳號或密碼錯誤',401);
   const token=crypto.randomUUID()+crypto.randomUUID();
-  await env.DB.batch([sql('DELETE FROM sessions WHERE expires<=?',now),sql('INSERT INTO sessions VALUES(?,?,?,?)',token,actor,demo[actor],now+7200000),
+  await env.DB.batch([sql('DELETE FROM sessions WHERE expires<=?',now),sql('INSERT INTO sessions(token,actor,role,expires,user_id) VALUES(?,?,?,?,?)',token,actor,account.role,now+7200000,account.id),
   sql("INSERT OR IGNORE INTO assets(tag,name,category) VALUES ('CAM-01','Sony 影音相機','相機'),('AUD-01','無線領夾麥克風','收音'),('TRI-01','專業攝影腳架','腳架')")]);
-  return reply({token,actor,role:demo[actor]});
+  return reply({token,actor,role:account.role});
  }
  const token=req.headers.get('Authorization')?.replace(/^Bearer /,'')??'';
- const user=await one('SELECT actor,role FROM sessions WHERE token=? AND expires>?',token,now);
+ const user=await one('SELECT s.actor,u.role,u.id user_id FROM sessions s JOIN users u ON u.account=s.actor AND (s.user_id IS NULL OR s.user_id=u.id) WHERE s.token=? AND s.expires>? AND u.active=1',token,now);
  if(!user)return fail('請先登入或重新登入',401);
+ if(path==='/api/logout'&&method==='POST'){
+  await sql('DELETE FROM sessions WHERE token=?',token).run();
+  return reply({message:'已登出，工作階段已撤銷'});
+ }
  const {actor,role}=user;
  const roomResponse=await handleRooms(req,env,user,body);
  if(roomResponse)return roomResponse;
@@ -44,7 +73,7 @@ const application = {async fetch(req,env){
   if(borrowerRoute){
    if(role!=='櫃台')return fail('沒有此操作的權限',403);
    const student=borrowerRoute[1];
-   if(demo[student]!=='學生')return fail('查無借用人',404);
+   if(!await one("SELECT id FROM users WHERE account=? AND role='學生'",student))return fail('查無借用人',404);
    let cursor=null;
    if(url.searchParams.has('cursor')){
     try{cursor=JSON.parse(url.searchParams.get('cursor'));if(!Number.isSafeInteger(cursor.start)||typeof cursor.id!=='string'||!/^[a-f0-9-]{36}$/.test(cursor.id))throw Error()}catch{return fail('紀錄分頁格式錯誤')}
@@ -65,7 +94,7 @@ const application = {async fetch(req,env){
   if(path==='/api/desk'&&role==='櫃台'){
    const day=url.searchParams.get('date')||'';
    const t=day?Date.parse(day+'T00:00:00+08:00'):null;
-   if(day&&(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(t)||new Date(t+28800000).toISOString().slice(0,10)!==day))return fail('日期格式錯誤');
+   if(day&&!validCalendarDate(day))return fail('日期格式錯誤');
    let cursor=null;
    if(url.searchParams.has('cursor')){try{cursor=JSON.parse(url.searchParams.get('cursor'));if(!Number.isSafeInteger(cursor.start)||typeof cursor.id!=='string'||!/^[a-f0-9-]{36}$/.test(cursor.id))throw Error()}catch{return fail('紀錄分頁格式錯誤')}}
    const where=day?'start>=? AND start<?':'1=1';const args=day?[t,t+86400000]:[];
@@ -80,7 +109,7 @@ const application = {async fetch(req,env){
  }
  if(method!=='POST')return fail('方法不支援',405);
  const key=req.headers.get('Idempotency-Key');
- if(!key||!/^[a-f0-9-]{36}$/i.test(key))return fail('缺少請求識別碼');
+ if(!validRequestKey(key))return fail('請求識別碼須為有效的 UUID v4');
  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(path+JSON.stringify(body)));
  const fingerprint=Array.from(new Uint8Array(digest),x=>x.toString(16).padStart(2,'0')).join('');
  const prior=await one('SELECT fingerprint FROM requests WHERE actor=? AND key=?',actor,key);
@@ -136,7 +165,7 @@ const application = {async fetch(req,env){
   throw e;
  }
  return reply({message:'操作成功',id},success);
- } catch(error){console.error(error);return fail('系統暫時無法完成操作',503)}
+ } catch(error){console.error(error);return fail('系統發生未預期錯誤，請稍後再試',500)}
 }};
 
 

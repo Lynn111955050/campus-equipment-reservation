@@ -10,3 +10,10 @@ export function timeError(start,end,opening,closing,maxDays,now=Date.now()) {
  if(end-start<1800000||end-start>14400000)return '每次借用至少30分鐘，最多4小時';
  return '';
 }
+
+export function validCalendarDate(value){
+ if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+ const time=Date.parse(value+'T00:00:00+08:00');
+ return Number.isFinite(time)&&new Date(time+28800000).toISOString().slice(0,10)===value;
+}
+export const validRequestKey=value=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);

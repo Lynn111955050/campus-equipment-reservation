@@ -1,0 +1,19 @@
+{
+  "date": "2026-11-16T14:31:16.835Z",
+  "environment": "Windows Node.js v24.22.1 localhost HTTP and in-memory SQLite",
+  "assets": 1000,
+  "rooms": 100,
+  "loans": 100000,
+  "virtual_clients": 200,
+  "session_model": "200 virtual clients sharing one valid student session",
+  "interval_ms": 5000,
+  "duration_ms": 300021,
+  "requests": 12000,
+  "errors": 0,
+  "success_percent": 100,
+  "p50_ms": 188.82769999999437,
+  "p95_ms": 296.35270000004675,
+  "p99_ms": 421.2589000000153,
+  "max_ms": 568.3623999999982,
+  "scope": "Local baseline only, excludes cloud D1 and public network latency"
+}

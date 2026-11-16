@@ -1,7 +1,7 @@
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
-const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
+const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 function setup(pages){
  const nodes=new Map();let calls=0,release;
  const node=()=>({innerHTML:'',textContent:'',hidden:false,disabled:false,open:true,addEventListener(){},querySelector(){return node()},insertAdjacentHTML(_,s){this.innerHTML+=s}});

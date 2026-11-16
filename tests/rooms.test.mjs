@@ -11,6 +11,8 @@ function setup(){
  db.exec(readFileSync(new URL('../drizzle/0002_rooms.sql',import.meta.url),'utf8'));
  db.exec(readFileSync(new URL('../drizzle/0003_room_event_integrity.sql',import.meta.url),'utf8'));
  db.exec(readFileSync(new URL('../drizzle/0004_integrity_constraints.sql',import.meta.url),'utf8'));
+ db.exec(readFileSync(new URL('../drizzle/0005_session_security.sql',import.meta.url),'utf8'));
+db.exec(readFileSync(new URL('../drizzle/0006_user_audit_links.sql',import.meta.url),'utf8'));
  const DB={
   prepare(query){
    const stmt=db.prepare(query);
@@ -75,7 +77,7 @@ assert.equal((await api('room-reservations',{...payload,room_id:'R3',start:slot(
 // A failing audit write must roll back the reservation and the retry record together.
 db.exec("CREATE TRIGGER audit_failure BEFORE INSERT ON room_events WHEN NEW.action='建立預約' BEGIN SELECT RAISE(ABORT,'TEST_AUDIT_FAILURE'); END;");
 const before=db.prepare('SELECT count(*) n FROM room_reservations').get().n;
-assert.equal((await api('room-reservations',{...payload,room_id:'R4',start:slot(14),end:slot(15)},refreshed)).status,503);
+assert.equal((await api('room-reservations',{...payload,room_id:'R4',start:slot(14),end:slot(15)},refreshed)).status,500);
 assert.equal(db.prepare('SELECT count(*) n FROM room_reservations').get().n,before);
 Date.now=realNow;
 console.log('Passed room creation, capacity and equipment filtering, overlap rejection, user conflicts, quotas, retry, access isolation, schedule privacy, check-in, finish, closure, no-show release and transaction rollback');

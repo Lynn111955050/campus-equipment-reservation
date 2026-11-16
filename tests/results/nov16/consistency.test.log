@@ -1,0 +1,15 @@
+Passed 21 consistency and boundary checks
+Error: TEST_CANCEL_ROLLBACK
+    at Object.run (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/tests/consistency.test.mjs:13:148)
+    at file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/tests/consistency.test.mjs:13:224
+    at Array.map (<anonymous>)
+    at Object.batch (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/tests/consistency.test.mjs:13:215)
+    at handleRooms (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/dist/server/rooms.js:114:16)
+    at async Object.fetch (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/dist/server/index.js:68:21)
+    at async Object.fetch (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/dist/server/index.js:176:17)
+    at async api (file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/tests/consistency.test.mjs:15:11)
+    at async file:///C:/Users/user/Documents/Codex/2026-11-07/new-chat-2/work/review-nov16/.sites-checkout/tests/consistency.test.mjs:63:28 {
+  code: 'ERR_SQLITE_ERROR',
+  errcode: 1811,
+  errstr: 'constraint failed'
+}

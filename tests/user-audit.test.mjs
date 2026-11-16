@@ -1,0 +1,32 @@
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import {initializeUsers} from '../dist/server/users.js';
+import worker from '../dist/server/index.js';
+const db=new DatabaseSync(':memory:');db.exec('PRAGMA foreign_keys=ON');
+for(const tag of ['0001_initial','0002_rooms','0003_room_event_integrity','0004_integrity_constraints','0005_session_security'])db.exec(readFileSync(new URL('../drizzle/'+tag+'.sql',import.meta.url),'utf8'));
+db.exec("INSERT INTO assets VALUES('A','相機','相機','可借'); INSERT INTO loans(id,tag,student,start,end,status,actor) VALUES('L','A','student',1,2,'已歸還','desk'); INSERT INTO loans(id,tag,student,start,end,status,actor) VALUES('OLD','A','已畢業學生',3,4,'已取消','舊櫃台'); INSERT INTO audit(tag,actor,action,ref) VALUES('A','desk','已歸還','L'),('A','舊櫃台','舊系統匯入','未知歷史編號');");
+const tables=['assets','loans','repairs','audit','requests','sessions','rooms','room_reservations','room_events'];
+const columns=Object.fromEntries(tables.map(t=>[t,db.prepare('PRAGMA table_info('+t+')').all().map(c=>c.name)]));
+const snapshot=()=>Object.fromEntries(tables.map(t=>[t,db.prepare('SELECT '+columns[t].join(',')+' FROM '+t+' ORDER BY rowid').all()]));
+const before=snapshot();db.exec('BEGIN');try{db.exec(readFileSync(new URL('../drizzle/0006_user_audit_links.sql',import.meta.url),'utf8'));db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}
+let checks=0;const check=fn=>{fn();checks++};check(()=>assert.deepEqual(snapshot(),before));
+const DB={prepare(q){const s=db.prepare(q);return {bind(...a){return {first:()=>s.get(...a),all:()=>({results:s.all(...a)}),run:()=>s.run(...a)}}}},batch(stmts){db.exec('BEGIN');try{const r=stmts.map(s=>s.run());db.exec('COMMIT');return r}catch(e){db.exec('ROLLBACK');throw e}}};
+await initializeUsers({DB},{student:'學生',student2:'學生',desk:'櫃台',admin:'管理員'},Date.now());
+check(()=>assert.deepEqual(snapshot(),before));check(()=>assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]));
+check(()=>assert.equal(db.prepare("SELECT student_id FROM loans WHERE id='L'").get().student_id,db.prepare("SELECT id FROM users WHERE account='student'").get().id));
+check(()=>assert.equal(db.prepare("SELECT student_id FROM loans WHERE id='OLD'").get().student_id,null));check(()=>assert.equal(db.prepare("SELECT actor_id FROM loans WHERE id='OLD'").get().actor_id,null));
+check(()=>assert.equal(db.prepare("SELECT loan_id FROM audit WHERE ref='L'").get().loan_id,'L'));
+check(()=>assert.equal(db.prepare("SELECT loan_id FROM audit WHERE ref='未知歷史編號'").get().loan_id,null));
+check(()=>assert.throws(()=>db.exec("INSERT INTO audit(tag,actor,action,ref) VALUES('A','desk','已歸還','missing')"),/AUDIT_LOAN_MISSING/));
+check(()=>assert.throws(()=>db.exec("INSERT INTO audit(tag,actor,action,ref,loan_id) VALUES('A','desk','已歸還','L','missing')"),/AUDIT_REFERENCE_MISMATCH/));
+check(()=>assert.throws(()=>db.exec("DELETE FROM loans WHERE id='L'"),/FOREIGN KEY/));check(()=>assert.throws(()=>db.exec("DELETE FROM users WHERE account='student'"),/FOREIGN KEY/));
+check(()=>assert.throws(()=>db.exec("UPDATE loans SET student_id=(SELECT id FROM users WHERE account='desk') WHERE id='L'"),/USER_ACCOUNT_MISMATCH/));
+check(()=>assert.throws(()=>db.exec("UPDATE users SET account='new-name' WHERE account='student'"),/USER_IDENTITY_IMMUTABLE/));
+async function call(path,body,token){const r=await worker.fetch(new Request('https://test.example/api/'+path,{method:body?'POST':'GET',headers:token?{Authorization:'Bearer '+token}:{},body:body?JSON.stringify(body):undefined}),{DB});return {status:r.status,data:await r.json()}}
+const login=await call('login',{actor:'student',password:'DemoAV-2026'});check(()=>assert.equal(login.status,200));
+check(()=>assert(db.prepare('SELECT user_id FROM sessions WHERE token=?').get(login.data.token).user_id));
+db.exec("UPDATE users SET active=0 WHERE account='student'");check(()=>assert.equal((db.prepare("SELECT active FROM users WHERE account='student'").get()).active,0));
+const denied=await call('reservations/me',undefined,login.data.token);check(()=>assert.equal(denied.status,401));
+const reLogin=await call('login',{actor:'student',password:'DemoAV-2026'});check(()=>assert.equal(reLogin.status,401));
+console.log('Passed '+checks+' user, audit foreign-key and historical migration checks');
